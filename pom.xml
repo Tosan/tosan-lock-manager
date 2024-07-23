@@ -9,7 +9,7 @@
     <name>Lock Manager</name>
 
     <description>Logical distributed lock with DBMS, Zookeeper, Redis and Hazelcast support</description>
-    <url>https://github.com/Tosan/lock-manager</url>
+    <url>https://github.com/Tosan/tosan-lock-manager</url>
 
     <licenses>
         <license>
@@ -30,7 +30,7 @@
     <scm>
         <connection>scm:git:https://github.com/Tosan/tosan-lock-manager.git</connection>
         <developerConnection>scm:git:https://github.com/Tosan/tosan-lock-manager.git</developerConnection>
-        <url>https://github.com/Tosan/lock-manager</url>
+        <url>https://github.com/Tosan/tosan-lock-manager</url>
         <tag>HEAD</tag>
     </scm>
 
@@ -221,7 +221,7 @@
                 <repository>
                     <id>github</id>
                     <name>GitHub</name>
-                    <url>https://maven.pkg.github.com/Tosan/lock-manager</url>
+                    <url>https://maven.pkg.github.com/Tosan/tosan-lock-manager</url>
                 </repository>
             </distributionManagement>
         </profile>
