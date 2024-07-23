@@ -31,7 +31,7 @@
         <connection>scm:git:https://github.com/Tosan/tosan-lock-manager.git</connection>
         <developerConnection>scm:git:https://github.com/Tosan/tosan-lock-manager.git</developerConnection>
         <url>https://github.com/Tosan/tosan-lock-manager</url>
-        <tag>v1.0.0</tag>
+        <tag>HEAD</tag>
     </scm>
 
     <properties>
@@ -225,7 +225,7 @@
                 </repository>
             </distributionManagement>
         </profile>
-        <!--<profile>
+        <profile>
             <id>build</id>
             <build>
                 <plugins>
@@ -242,7 +242,7 @@
                                 </goals>
                                 <configuration>
                                     <gpgArguments>
-                                        <arg>&#45;&#45;pinentry-mode</arg>
+                                        <arg>--pinentry-mode</arg>
                                         <arg>loopback</arg>
                                     </gpgArguments>
                                 </configuration>
@@ -273,6 +273,6 @@
                     <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
                 </repository>
             </distributionManagement>
-        </profile>-->
+        </profile>
     </profiles>
 </project>
