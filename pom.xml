@@ -4,7 +4,7 @@
 
     <groupId>com.tosan.tools</groupId>
     <artifactId>tosan-lock-manager</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>Lock Manager</name>
 
