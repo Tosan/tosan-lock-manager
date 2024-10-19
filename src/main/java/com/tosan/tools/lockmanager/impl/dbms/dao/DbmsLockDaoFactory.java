@@ -5,6 +5,7 @@ import jakarta.persistence.EntityManager;
 import org.hibernate.dialect.DB2Dialect;
 import org.hibernate.dialect.Dialect;
 import org.hibernate.dialect.OracleDialect;
+import org.hibernate.dialect.PostgreSQLDialect;
 import org.hibernate.internal.SessionFactoryImpl;
 
 /**
@@ -20,6 +21,8 @@ public abstract class DbmsLockDaoFactory {
             return new OracleDbmsLockDaoImpl(entityManager);
         } else if (dialect instanceof DB2Dialect) {
             return new Db2DbmsLockDaoImpl(entityManager);
+        } else if (dialect instanceof PostgreSQLDialect) {
+            return new PostgresqlDbmsLockDaoImpl(entityManager);
         }
         throw new LockManagerRunTimeException("the database dialect is not supported: " + dialect.getClass());
     }
