@@ -1,13 +1,11 @@
-package com.tosan.tools.lockmanager.impl.dbms.dao.service;
+package com.tosan.tools.lockmanager.impl.dbms.dao.invoker;
 
 import com.tosan.tools.lockmanager.exception.LockManagerRunTimeException;
 import com.tosan.tools.lockmanager.exception.LockManagerTimeoutException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.exception.DaoRuntimeException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.util.DbmsLockInfo;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.ParameterMode;
+import jakarta.persistence.Query;
 import jakarta.persistence.StoredProcedureQuery;
-import org.apache.commons.lang3.StringUtils;
 import org.hibernate.Session;
 import org.hibernate.procedure.ProcedureOutputs;
 import org.slf4j.Logger;
@@ -15,37 +13,30 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.CallableStatement;
 import java.sql.Types;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author mortezaei
  * @since 11/19/2024
- *
+ * <p>
  * This util uses pg_dbms_lock package to handle locks.
  */
-public class PostgresqlDbmsLockServiceUtil {
+public class PostgresqlDbmsLockInvoker implements DbmsLockInvoker {
+    private static final Logger LOGGER = LoggerFactory.getLogger(PostgresqlDbmsLockInvoker.class);
+    public static final String CURRENT_SCHEMA_QUERY = "SELECT current_schema()";
+    public static final String ALLOCATE_LOCK_QUERY = "dbms_lock.allocate_unique";
+    public static final String RELEASE_LOCK_QUERY = "SELECT dbms_lock.release(:lockHandle)";
     public static final Integer SHARED_MODE = 4;
     public static final Integer EXCLUSIVE_MODE = 6;
-    public static final String GET_SCHEMA_NAME_QUERY = "SELECT current_schema()";
-    public static final String RELEASE_LOCK_QUERY = "SELECT dbms_lock.release(:lockHandle)";
-    private static final Logger LOGGER = LoggerFactory.getLogger(PostgresqlDbmsLockServiceUtil.class);
     private static final int DEFAULT_READ_LOCK_TIMEOUT = 60;
     private static final int DEFAULT_WRIT_LOCK_TIMEOUT = 7200;
-    private static final Map<String, DbmsLockInfo> dbmsLockHandle = new ConcurrentHashMap<>();
-    private boolean lockIdentifiersCache = false;
-    private int allocatedLockTimeToLiveInSecond = 864000;
 
-    public void setLockIdentifiersCache(boolean lockIdentifiersCache) {
-        this.lockIdentifiersCache = lockIdentifiersCache;
+    @Override
+    public String currentSchema(final EntityManager entityManager) {
+        Query query = entityManager.createNativeQuery(CURRENT_SCHEMA_QUERY);
+        return (String) query.getSingleResult();
     }
 
-    public void setAllocatedLockTimeToLiveInSecond(Integer allocatedLockTimeToLiveInSecond) {
-        this.allocatedLockTimeToLiveInSecond = allocatedLockTimeToLiveInSecond;
-    }
-
+    @Override
     public void requestLock(final EntityManager entityManager, final String lockHandle, final Integer lockMode,
                             final Integer timeout, final boolean releaseOnCommit) {
         LOGGER.debug("Requesting lock with handle {}", lockHandle);
@@ -71,9 +62,10 @@ public class PostgresqlDbmsLockServiceUtil {
                     callStatus[0] = call.getInt(1);
                 }
             });
-        } catch (Throwable e) {
-            throw new DaoRuntimeException(e.getMessage());
+        } catch (Exception e) {
+            throw new LockManagerRunTimeException(e.getMessage(), e);
         }
+
         switch (callStatus[0]) {
             case 0:
                 LOGGER.debug("Acquired lock with handle {}.", lockHandle);
@@ -93,34 +85,33 @@ public class PostgresqlDbmsLockServiceUtil {
         }
     }
 
-    public String getLockHandle(EntityManager entityManager, String schemaName, String lockNameType, String lockName) {
-        LOGGER.debug("Requesting lock handle for lock with name '{}'.", lockName);
-        String uniqueLockName =
-                schemaName + "-" + lockNameType + (StringUtils.isNotEmpty(lockName) ? "-" + lockName : "");
-        if (!lockIdentifiersCache) {
-            return getLockHandle(entityManager, uniqueLockName, allocatedLockTimeToLiveInSecond);
+    @Override
+    public void convertLock(EntityManager entityManager, String lockHandle, Integer lockMode, Integer timeout) {
+    }
+
+    @Override
+    public void releaseLock(EntityManager entityManager, final String lockHandle) {
+        LOGGER.debug("Requesting release lock with handle {}", lockHandle);
+        Query query = entityManager.createNativeQuery(RELEASE_LOCK_QUERY);
+        query.setParameter("lockHandle", lockHandle);
+        int result = ((Number) query.getSingleResult()).intValue();
+
+        switch (result) {
+            case 0:
+            case 4:
+                LOGGER.debug("Released lock with handle {}", lockHandle);
+                return;
+            case 3:
+                throw new LockManagerRunTimeException("Parameter error occurred in 'DBMS_LOCK' release.");
+            case 5:
+                throw new LockManagerRunTimeException("Illegal lock handle error occurred in 'DBMS_LOCK' release.");
+            default:
+                throw new LockManagerRunTimeException("Error occurred in 'DBMS_LOCK' release.");
         }
-        DbmsLockInfo dbmsLockDto = dbmsLockHandle.get(uniqueLockName);
-        if (dbmsLockDto == null || dbmsLockDto.getLockExpireTime().compareTo(new Date()) <= 0) {
-            short DBMS_LOCK_NAME_MAX_LENGTH = 128;
-            if (uniqueLockName.length() > DBMS_LOCK_NAME_MAX_LENGTH) {
-                LOGGER.error("Dbms lock name '{}' cannot be more than {} characters.",
-                        uniqueLockName, DBMS_LOCK_NAME_MAX_LENGTH);
-                throw new LockManagerRunTimeException("Dbms lock name cannot be more than " +
-                        DBMS_LOCK_NAME_MAX_LENGTH + " characters.");
-            }
-            Calendar expireDate = Calendar.getInstance();
-            expireDate.set(Calendar.SECOND, expireDate.get(Calendar.SECOND) + allocatedLockTimeToLiveInSecond);
-            dbmsLockDto = new DbmsLockInfo(
-                    uniqueLockName, getLockHandle(entityManager, uniqueLockName, allocatedLockTimeToLiveInSecond),
-                    expireDate.getTime());
-            dbmsLockHandle.put(uniqueLockName, dbmsLockDto);
-        }
-        return dbmsLockDto.getLockHandel();
     }
 
     /**
-     * 'getLockHandle' using ALLOCATE_UNIQUE procedure in DBMS_LOCK package that allocates a unique lock identifier
+     * 'allocateLock' using ALLOCATE_UNIQUE procedure in DBMS_LOCK package that allocates a unique lock identifier
      * (in the range of 1073741824 to 1999999999) given a lock name.
      * Lock identifiers are used to enable applications to coordinate their use of locks.
      * A lock name is associated with the returned lock ID for at least expiration_secs (defaults to 10 days) past the
@@ -132,9 +123,10 @@ public class PostgresqlDbmsLockServiceUtil {
      * @param expirationSecond Length of time to leave lock allocated
      * @return The handle to the lock ID generated by ALLOCATE_UNIQUE.
      */
-    public String getLockHandle(final EntityManager entityManager, final String lockName, final int expirationSecond) {
+    @Override
+    public String allocateLock(final EntityManager entityManager, final String lockName, final int expirationSecond) {
         StoredProcedureQuery query = entityManager
-                .createStoredProcedureQuery("dbms_lock.allocate_unique")
+                .createStoredProcedureQuery(ALLOCATE_LOCK_QUERY)
                 .registerStoredProcedureParameter(1, String.class, ParameterMode.IN)
                 .registerStoredProcedureParameter(2, String.class, ParameterMode.OUT)
                 .registerStoredProcedureParameter(3, Integer.class, ParameterMode.IN)

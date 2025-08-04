@@ -1,13 +1,11 @@
-package com.tosan.tools.lockmanager.impl.dbms.dao.service;
+package com.tosan.tools.lockmanager.impl.dbms.dao.invoker;
 
 import com.tosan.tools.lockmanager.exception.LockManagerRunTimeException;
 import com.tosan.tools.lockmanager.exception.LockManagerTimeoutException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.exception.DaoRuntimeException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.util.DbmsLockInfo;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.ParameterMode;
+import jakarta.persistence.Query;
 import jakarta.persistence.StoredProcedureQuery;
-import org.apache.commons.lang3.StringUtils;
 import org.hibernate.Session;
 import org.hibernate.procedure.ProcedureOutputs;
 import org.slf4j.Logger;
@@ -15,41 +13,35 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.CallableStatement;
 import java.sql.Types;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author akhbari
  * @since 04/03/2019
  */
-public class OracleDbmsLockServiceUtil {
+public class OracleDbmsLockInvoker implements DbmsLockInvoker {
+    private static final Logger LOGGER = LoggerFactory.getLogger(OracleDbmsLockInvoker.class);
+    public static final String CURRENT_SCHEMA_QUERY = "SELECT SYS_CONTEXT('userenv','CURRENT_SCHEMA') FROM DUAL";
+    public static final String ALLOCATE_LOCK_QUERY = "DBMS_LOCK.ALLOCATE_UNIQUE";
+    public static final String RELEASE_LOCK_QUERY = "SELECT DBMS_LOCK.RELEASE(:lockHandle) FROM DUAL";
+    public static final String CONVERT_LOCK_QUERY = "SELECT DBMS_LOCK.CONVERT(:lockHandle, :lockMode, :timeout) FROM DUAL";
     public static final Integer SUB_SHARED_MODE = 2;
     public static final Integer EXCLUSIVE_MODE = 6;
-    public static final String GET_SCHEMA_NAME_QUERY = "SELECT sys_context('userenv','CURRENT_SCHEMA') FROM dual";
-    public static final String RELEASE_LOCK_QUERY = "SELECT DBMS_LOCK.RELEASE(:lockHandle) FROM dual";
-    private static final Logger LOGGER = LoggerFactory.getLogger(OracleDbmsLockServiceUtil.class);
     private static final int DEFAULT_READ_LOCK_TIMEOUT = 60;
     private static final int DEFAULT_WRIT_LOCK_TIMEOUT = 7200;
-    private static final Map<String, DbmsLockInfo> dbmsLockHandle = new ConcurrentHashMap<>();
-    private boolean lockIdentifiersCache = false;
-    private int allocatedLockTimeToLiveInSecond = 864000;
 
-    public void setLockIdentifiersCache(boolean lockIdentifiersCache) {
-        this.lockIdentifiersCache = lockIdentifiersCache;
+    @Override
+    public String currentSchema(final EntityManager entityManager) {
+        Query query = entityManager.createNativeQuery(CURRENT_SCHEMA_QUERY);
+        return (String) query.getSingleResult();
     }
 
-    public void setAllocatedLockTimeToLiveInSecond(Integer allocatedLockTimeToLiveInSecond) {
-        this.allocatedLockTimeToLiveInSecond = allocatedLockTimeToLiveInSecond;
-    }
-
+    @Override
     public void requestLock(final EntityManager entityManager, final String lockHandle, final Integer lockMode,
                             final Integer timeout, final boolean releaseOnCommit) {
         LOGGER.debug("Requesting lock with handle {}", lockHandle);
         final int[] callStatus = new int[1];
-        //As DBMS_LOCK.REQUEST has boolean input param, cant use entityManager
-        //                    .createNativeQuery because select does not support boolean value
+        //As DBMS_LOCK.REQUEST has boolean input param,
+        //can't use entityManager.createNativeQuery because select does not support boolean value
         Session session = entityManager.unwrap(Session.class);
         try {
             session.doWork(connection -> {
@@ -69,8 +61,8 @@ public class OracleDbmsLockServiceUtil {
                     callStatus[0] = call.getInt(1);
                 }
             });
-        } catch (Throwable e) {
-            throw new DaoRuntimeException(e.getMessage());
+        } catch (Exception e) {
+            throw new LockManagerRunTimeException(e.getMessage(), e);
         }
         switch (callStatus[0]) {
             case 0:
@@ -93,21 +85,20 @@ public class OracleDbmsLockServiceUtil {
         }
     }
 
+    @Override
     public void convertLock(final EntityManager entityManager, final String lockHandle, final Integer lockMode, final Integer timeout) {
         LOGGER.debug("Requesting convert lock with handle {}", lockHandle);
         final Number callStatus;
         try {
             callStatus = (Number) entityManager
-                    .createNativeQuery(
-                            "SELECT DBMS_LOCK.CONVERT(:lockHandle, :lockMode, :timeout) FROM DUAL"
-                    )
+                    .createNativeQuery(CONVERT_LOCK_QUERY)
                     .setParameter("lockHandle", lockHandle)
                     .setParameter("lockMode", lockMode)
                     .setParameter("timeout", timeout == null ? lockMode.equals(SUB_SHARED_MODE) ?
                             DEFAULT_READ_LOCK_TIMEOUT : DEFAULT_WRIT_LOCK_TIMEOUT : timeout)
                     .getSingleResult();
-        } catch (Throwable e) {
-            throw new DaoRuntimeException(e.getMessage());
+        } catch (Exception e) {
+            throw new LockManagerRunTimeException(e.getMessage(), e);
         }
 
         switch (callStatus.intValue()) {
@@ -129,34 +120,29 @@ public class OracleDbmsLockServiceUtil {
         }
     }
 
-    public String getLockHandle(EntityManager entityManager, String schemaName, String lockNameType, String lockName) {
-        LOGGER.debug("Requesting lock handle for lock with name '{}'.", lockName);
-        String uniqueLockName =
-                schemaName + "-" + lockNameType + (StringUtils.isNotEmpty(lockName) ? "-" + lockName : "");
-        if (!lockIdentifiersCache) {
-            return getLockHandle(entityManager, uniqueLockName, allocatedLockTimeToLiveInSecond);
+    @Override
+    public void releaseLock(final EntityManager entityManager, final String lockHandle) {
+        LOGGER.debug("Requesting release lock with handle {}", lockHandle);
+        Query query = entityManager.createNativeQuery(RELEASE_LOCK_QUERY);
+        query.setParameter("lockHandle", lockHandle);
+        int result = ((Number) query.getSingleResult()).intValue();
+
+        switch (result) {
+            case 0:
+            case 4:
+                LOGGER.debug("Released lock with handle {}", lockHandle);
+                return;
+            case 3:
+                throw new LockManagerRunTimeException("Parameter error occurred in 'DBMS_LOCK' release.");
+            case 5:
+                throw new LockManagerRunTimeException("Illegal lock handle error occurred in 'DBMS_LOCK' release.");
+            default:
+                throw new LockManagerRunTimeException("Error occurred in 'DBMS_LOCK' release.");
         }
-        DbmsLockInfo dbmsLockDto = dbmsLockHandle.get(uniqueLockName);
-        if (dbmsLockDto == null || dbmsLockDto.getLockExpireTime().compareTo(new Date()) <= 0) {
-            short DBMS_LOCK_NAME_MAX_LENGTH = 128;
-            if (uniqueLockName.length() > DBMS_LOCK_NAME_MAX_LENGTH) {
-                LOGGER.error("Dbms lock name '{}' cannot be more than {} characters.",
-                        uniqueLockName, DBMS_LOCK_NAME_MAX_LENGTH);
-                throw new LockManagerRunTimeException("Dbms lock name cannot be more than " +
-                        DBMS_LOCK_NAME_MAX_LENGTH + " characters.");
-            }
-            Calendar expireDate = Calendar.getInstance();
-            expireDate.set(Calendar.SECOND, expireDate.get(Calendar.SECOND) + allocatedLockTimeToLiveInSecond);
-            dbmsLockDto = new DbmsLockInfo(
-                    uniqueLockName, getLockHandle(entityManager, uniqueLockName, allocatedLockTimeToLiveInSecond),
-                    expireDate.getTime());
-            dbmsLockHandle.put(uniqueLockName, dbmsLockDto);
-        }
-        return dbmsLockDto.getLockHandel();
     }
 
     /**
-     * 'getLockHandle' using ALLOCATE_UNIQUE procedure in DBMS_LOCK package that allocates a unique lock identifier
+     * 'allocateLock' using ALLOCATE_UNIQUE procedure in DBMS_LOCK package that allocates a unique lock identifier
      * (in the range of 1073741824 to 1999999999) given a lock name.
      * Lock identifiers are used to enable applications to coordinate their use of locks.
      * A lock name is associated with the returned lock ID for at least expiration_secs (defaults to 10 days) past the
@@ -168,9 +154,10 @@ public class OracleDbmsLockServiceUtil {
      * @param expirationSecond Length of time to leave lock allocated
      * @return The handle to the lock ID generated by ALLOCATE_UNIQUE.
      */
-    public String getLockHandle(final EntityManager entityManager, final String lockName, final int expirationSecond) {
+    @Override
+    public String allocateLock(final EntityManager entityManager, final String lockName, final int expirationSecond) {
         StoredProcedureQuery query = entityManager
-                .createStoredProcedureQuery("DBMS_LOCK.ALLOCATE_UNIQUE")
+                .createStoredProcedureQuery(ALLOCATE_LOCK_QUERY)
                 .registerStoredProcedureParameter(1, String.class, ParameterMode.IN)
                 .registerStoredProcedureParameter(2, String.class, ParameterMode.OUT)
                 .registerStoredProcedureParameter(3, Integer.class, ParameterMode.IN)
@@ -182,8 +169,7 @@ public class OracleDbmsLockServiceUtil {
             LOGGER.debug("Acquired lock handle {} for lock with name '{}'.", lockHandle, lockName);
             return lockHandle;
         } finally {
-            query.unwrap(ProcedureOutputs.class)
-                    .release();
+            query.unwrap(ProcedureOutputs.class).release();
         }
     }
 }

@@ -1,37 +1,33 @@
 package com.tosan.tools.lockmanager.impl.dbms.dao;
 
-import com.tosan.tools.lockmanager.impl.dbms.dao.exception.DaoRuntimeException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.service.Db2DbmsLockServiceUtil;
+import com.tosan.tools.lockmanager.exception.LockManagerRunTimeException;
+import com.tosan.tools.lockmanager.impl.dbms.dao.invoker.Db2DbmsLockInvoker;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import jakarta.persistence.Query;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * @author akhbari
  * @since 02/03/2019
  */
 public class Db2DbmsLockDaoImpl implements DbmsLockDao {
+    private final Db2DbmsLockInvoker dbmsLockInvoker;
     private String schemaName = null;
-    private final Db2DbmsLockServiceUtil db2DbmsLockServiceUtil;
 
     @PersistenceContext
-    private jakarta.persistence.EntityManager entityManager;
+    private final jakarta.persistence.EntityManager entityManager;
+
+    public Db2DbmsLockDaoImpl(EntityManager entityManager) {
+        this.entityManager = entityManager;
+        this.dbmsLockInvoker = new Db2DbmsLockInvoker();
+    }
 
     public EntityManager getEntityManager() {
         return entityManager;
     }
 
-    public Db2DbmsLockServiceUtil getDb2DbmsLockServiceUtil() {
-        return db2DbmsLockServiceUtil;
-    }
-
-    public void setLockIdentifiersCache(boolean lockIdentifiersCache) {
-        db2DbmsLockServiceUtil.setLockIdentifiersCache(lockIdentifiersCache);
-    }
-
-    public Db2DbmsLockDaoImpl(EntityManager entityManager) {
-        this.entityManager = entityManager;
-        db2DbmsLockServiceUtil = new Db2DbmsLockServiceUtil();
+    public Db2DbmsLockInvoker getDbmsLockInvoker() {
+        return dbmsLockInvoker;
     }
 
     @Override
@@ -40,21 +36,22 @@ public class Db2DbmsLockDaoImpl implements DbmsLockDao {
             if (schemaName == null) {
                 synchronized (Db2DbmsLockDaoImpl.class) {
                     if (schemaName == null) {
-                        Query query = getEntityManager().createNativeQuery(Db2DbmsLockServiceUtil.GET_SCHEMA_NAME_QUERY);
-                        schemaName = (String) query.getSingleResult();
+                        schemaName = dbmsLockInvoker.currentSchema(entityManager);
                     }
                 }
             }
             return schemaName;
-        } catch (Throwable e) {
-            throw new DaoRuntimeException(e.getMessage());
+        } catch (Exception e) {
+            throw new LockManagerRunTimeException(e.getMessage(), e);
         }
     }
 
     @Override
     public void requestWriteLock(String lockNameType, String lockName, Integer timeout, boolean releaseOnCommit) {
-        db2DbmsLockServiceUtil.requestWriteLock(entityManager, getSchemaName(),
-                db2DbmsLockServiceUtil.getLockHandle(getSchemaName(), lockNameType, lockName));
+        dbmsLockInvoker.requestLock(
+                entityManager,
+                getLockHandle(getSchemaName(), lockNameType, lockName),
+                null, timeout, releaseOnCommit);
     }
 
     @Override
@@ -71,5 +68,9 @@ public class Db2DbmsLockDaoImpl implements DbmsLockDao {
 
     @Override
     public void unLock(String lockNameType, String lockName) {
+    }
+
+    public String getLockHandle(String schemaName, String lockNameType, String lockName) {
+        return schemaName + "-" + lockNameType + (StringUtils.isNotEmpty(lockName) ? "-" + lockName : "");
     }
 }

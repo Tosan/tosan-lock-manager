@@ -1,78 +1,92 @@
 package com.tosan.tools.lockmanager.impl.dbms.dao;
 
 import com.tosan.tools.lockmanager.exception.LockManagerRunTimeException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.exception.DaoRuntimeException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.service.OracleDbmsLockServiceUtil;
+import com.tosan.tools.lockmanager.impl.dbms.dao.invoker.OracleDbmsLockInvoker;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import jakarta.persistence.Query;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Calendar;
+import java.util.Date;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author akhbari
  * @since 02/03/2019
  */
 public class OracleDbmsLockDaoImpl implements DbmsLockDao {
-    private static final Logger LOGGER = LoggerFactory.getLogger(OracleDbmsLockDaoImpl.class);
+    private static final Logger logger = LoggerFactory.getLogger(OracleDbmsLockDaoImpl.class);
+    private static final short DBMS_LOCK_NAME_MAX_LENGTH = 128;
+    private static final Map<String, DbmsLockInfo> dbmsLockHandle = new ConcurrentHashMap<>();
+    private final OracleDbmsLockInvoker dbmsLockInvoker;
+    private boolean lockIdentifiersCache = false;
+    private int allocatedLockTimeToLiveInSecond = 864000;
     private String schemaName = null;
-    private final OracleDbmsLockServiceUtil oracleDbmsLockServiceUtil;
-
-    public OracleDbmsLockServiceUtil getOracleDbmsLockServiceUtil() {
-        return oracleDbmsLockServiceUtil;
-    }
 
     @PersistenceContext
-    private jakarta.persistence.EntityManager entityManager;
+    private final jakarta.persistence.EntityManager entityManager;
+
+    public OracleDbmsLockDaoImpl(EntityManager entityManager) {
+        this.entityManager = entityManager;
+        this.dbmsLockInvoker = new OracleDbmsLockInvoker();
+    }
 
     public EntityManager getEntityManager() {
         return entityManager;
     }
 
-    public OracleDbmsLockDaoImpl(EntityManager entityManager) {
-        this.entityManager = entityManager;
-        oracleDbmsLockServiceUtil = new OracleDbmsLockServiceUtil();
+    public OracleDbmsLockInvoker getDbmsLockInvoker() {
+        return dbmsLockInvoker;
     }
 
     public void setLockIdentifiersCache(boolean lockIdentifiersCache) {
-        oracleDbmsLockServiceUtil.setLockIdentifiersCache(lockIdentifiersCache);
+        this.lockIdentifiersCache = lockIdentifiersCache;
     }
 
     public void setAllocatedLockTimeToLiveInSecond(int allocatedLockTimeToLiveInSecond) {
-        oracleDbmsLockServiceUtil.setAllocatedLockTimeToLiveInSecond(allocatedLockTimeToLiveInSecond);
+        this.allocatedLockTimeToLiveInSecond = allocatedLockTimeToLiveInSecond;
     }
 
     @Override
     public void requestReadLock(String lockNameType, String lockName, Integer timeout, boolean releaseOnCommit) {
-        oracleDbmsLockServiceUtil.requestLock(entityManager, oracleDbmsLockServiceUtil.getLockHandle(entityManager, getSchemaName(),
-                        lockNameType, lockName),
-                OracleDbmsLockServiceUtil.SUB_SHARED_MODE, timeout, releaseOnCommit);
+        dbmsLockInvoker.requestLock(
+                entityManager,
+                getLockHandle(entityManager, getSchemaName(), lockNameType, lockName),
+                OracleDbmsLockInvoker.SUB_SHARED_MODE, timeout, releaseOnCommit);
     }
 
     @Override
     public void requestWriteLock(String lockNameType, String lockName, Integer timeout, boolean releaseOnCommit) {
-        oracleDbmsLockServiceUtil.requestLock(entityManager, oracleDbmsLockServiceUtil.getLockHandle(entityManager, getSchemaName(),
-                        lockNameType, lockName),
-                OracleDbmsLockServiceUtil.EXCLUSIVE_MODE, timeout, releaseOnCommit);
+        dbmsLockInvoker.requestLock(
+                entityManager,
+                getLockHandle(entityManager, getSchemaName(), lockNameType, lockName),
+                OracleDbmsLockInvoker.EXCLUSIVE_MODE, timeout, releaseOnCommit);
     }
 
     @Override
     public void convertToReadLock(String lockNameType, String lockName, Integer timeout) {
-        oracleDbmsLockServiceUtil.convertLock(entityManager, oracleDbmsLockServiceUtil.getLockHandle(entityManager, getSchemaName(),
-                        lockNameType, lockName),
-                OracleDbmsLockServiceUtil.SUB_SHARED_MODE, timeout);
+        dbmsLockInvoker.convertLock(
+                entityManager,
+                getLockHandle(entityManager, getSchemaName(), lockNameType, lockName),
+                OracleDbmsLockInvoker.SUB_SHARED_MODE, timeout);
     }
 
     @Override
     public void convertToWriteLock(String lockNameType, String lockName, Integer timeout) {
-        oracleDbmsLockServiceUtil.convertLock(entityManager, oracleDbmsLockServiceUtil.getLockHandle(entityManager, getSchemaName(),
-                        lockNameType, lockName),
-                OracleDbmsLockServiceUtil.EXCLUSIVE_MODE, timeout);
+        dbmsLockInvoker.convertLock(
+                entityManager,
+                getLockHandle(entityManager, getSchemaName(), lockNameType, lockName),
+                OracleDbmsLockInvoker.EXCLUSIVE_MODE, timeout);
     }
 
     @Override
     public void unLock(String lockNameType, String lockName) {
-        releaseLock(oracleDbmsLockServiceUtil.getLockHandle(entityManager, getSchemaName(), lockNameType, lockName));
+        dbmsLockInvoker.releaseLock(
+                entityManager,
+                getLockHandle(entityManager, getSchemaName(), lockNameType, lockName));
     }
 
     @Override
@@ -81,34 +95,38 @@ public class OracleDbmsLockDaoImpl implements DbmsLockDao {
             if (schemaName == null) {
                 synchronized (OracleDbmsLockDaoImpl.class) {
                     if (schemaName == null) {
-                        Query query = getEntityManager().createNativeQuery(OracleDbmsLockServiceUtil.GET_SCHEMA_NAME_QUERY);
-                        schemaName = (String) query.getSingleResult();
+                        schemaName = dbmsLockInvoker.currentSchema(entityManager);
                     }
                 }
             }
             return schemaName;
-        } catch (Throwable e) {
-            throw new DaoRuntimeException(e.getMessage());
+        } catch (Exception e) {
+            throw new LockManagerRunTimeException(e.getMessage(), e);
         }
     }
 
-    private void releaseLock(final String lockHandle) {
-        LOGGER.debug("Requesting release lock with handle {}", lockHandle);
-        Query query = getEntityManager().createNativeQuery(OracleDbmsLockServiceUtil.RELEASE_LOCK_QUERY);
-        query.setParameter("lockHandle", lockHandle);
-        int result = ((Number) query.getSingleResult()).intValue();
-
-        switch (result) {
-            case 0:
-            case 4:
-                LOGGER.debug("Released lock with handle {}", lockHandle);
-                return;
-            case 3:
-                throw new LockManagerRunTimeException("Parameter error occurred in 'DBMS_LOCK' release.");
-            case 5:
-                throw new LockManagerRunTimeException("Illegal lock handle error occurred in 'DBMS_LOCK' release.");
-            default:
-                throw new LockManagerRunTimeException("Error occurred in 'DBMS_LOCK' release.");
+    public String getLockHandle(EntityManager entityManager, String schemaName, String lockNameType, String lockName) {
+        logger.debug("Requesting lock handle for lock with name '{}'.", lockName);
+        String uniqueLockName =
+                schemaName + "-" + lockNameType + (StringUtils.isNotEmpty(lockName) ? "-" + lockName : "");
+        if (!lockIdentifiersCache) {
+            return dbmsLockInvoker.allocateLock(entityManager, uniqueLockName, allocatedLockTimeToLiveInSecond);
         }
+        DbmsLockInfo dbmsLockDto = dbmsLockHandle.get(uniqueLockName);
+        if (dbmsLockDto == null || dbmsLockDto.getLockExpireTime().compareTo(new Date()) <= 0) {
+            if (uniqueLockName.length() > DBMS_LOCK_NAME_MAX_LENGTH) {
+                logger.error("Dbms lock name '{}' cannot be more than {} characters.",
+                        uniqueLockName, DBMS_LOCK_NAME_MAX_LENGTH);
+                throw new LockManagerRunTimeException("Dbms lock name cannot be more than " +
+                        DBMS_LOCK_NAME_MAX_LENGTH + " characters.");
+            }
+            Calendar expireDate = Calendar.getInstance();
+            expireDate.set(Calendar.SECOND, expireDate.get(Calendar.SECOND) + allocatedLockTimeToLiveInSecond);
+            dbmsLockDto = new DbmsLockInfo(
+                    uniqueLockName, dbmsLockInvoker.allocateLock(entityManager, uniqueLockName, allocatedLockTimeToLiveInSecond),
+                    expireDate.getTime());
+            dbmsLockHandle.put(uniqueLockName, dbmsLockDto);
+        }
+        return dbmsLockDto.getLockHandel();
     }
 }

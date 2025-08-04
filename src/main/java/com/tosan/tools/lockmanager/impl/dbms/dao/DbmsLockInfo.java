@@ -1,4 +1,4 @@
-package com.tosan.tools.lockmanager.impl.dbms.dao.util;
+package com.tosan.tools.lockmanager.impl.dbms.dao;
 
 import java.util.Date;
 
@@ -7,7 +7,6 @@ import java.util.Date;
  * @since 02/03/2019
  */
 public class DbmsLockInfo {
-
     private String lockName;
     private String lockHandel;
     private Date lockExpireTime;
