@@ -1,4 +1,4 @@
-package com.tosan.tools.lockmanager.impl.dbms.dao;
+package com.tosan.tools.lockmanager.impl.dbms.service;
 
 import java.util.Date;
 
