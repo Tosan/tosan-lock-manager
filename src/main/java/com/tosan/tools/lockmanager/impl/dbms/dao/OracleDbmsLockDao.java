@@ -7,8 +7,6 @@ import org.hibernate.Session;
 import org.hibernate.procedure.ProcedureOutputs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.CallableStatement;
 import java.sql.Types;
