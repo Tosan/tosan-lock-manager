@@ -5,6 +5,7 @@ import com.tosan.tools.lockmanager.exception.LockManagerRunTimeException;
 import com.tosan.tools.lockmanager.exception.LockManagerTimeoutException;
 import com.tosan.tools.lockmanager.impl.dbms.dao.DbmsLockDao;
 import com.tosan.tools.lockmanager.impl.dbms.dao.DbmsLockDaoFactory;
+import com.tosan.tools.lockmanager.impl.dbms.dao.RequestLockType;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +32,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Override
     public void requestReadLock(String lockNameType, boolean releaseOnCommit) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.requestReadLock(lockNameType, null, null, releaseOnCommit);
+            requestReadLock(lockNameType, null, null, releaseOnCommit);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write lock '{}' held by another method. {}", lockNameType, e.getMessage());
             throw e;
@@ -42,7 +43,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Override
     public void requestReadLock(String lockNameType, String lockName, boolean releaseOnCommit) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.requestReadLock(lockNameType, lockName, null, releaseOnCommit);
+            requestReadLock(lockNameType, lockName, null, releaseOnCommit);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
@@ -54,7 +55,7 @@ public class DbmsLockManagementService implements LockManagementService {
     public void requestReadLock(String lockNameType, String lockName, Integer lockTimeout, boolean releaseOnCommit)
             throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.requestReadLock(lockNameType, lockName, lockTimeout, releaseOnCommit);
+            dbmsLockDao.requestLock(lockNameType, lockName, lockTimeout, releaseOnCommit, RequestLockType.READ);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
@@ -65,7 +66,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Override
     public void requestWriteLock(String lockNameType, boolean releaseOnCommit) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.requestWriteLock(lockNameType, null, null, releaseOnCommit);
+            requestWriteLock(lockNameType, null, null, releaseOnCommit);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write or read lock '{}' held by another method. {}", lockNameType, e.getMessage());
             throw e;
@@ -76,7 +77,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Override
     public void requestWriteLock(String lockNameType, String lockName, boolean releaseOnCommit) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.requestWriteLock(lockNameType, lockName, null, releaseOnCommit);
+            requestWriteLock(lockNameType, lockName, null, releaseOnCommit);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write or read lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
@@ -88,7 +89,7 @@ public class DbmsLockManagementService implements LockManagementService {
     public void requestWriteLock(String lockNameType, String lockName, Integer lockTimeout, boolean releaseOnCommit)
             throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.requestWriteLock(lockNameType, lockName, lockTimeout, releaseOnCommit);
+            dbmsLockDao.requestLock(lockNameType, lockName, lockTimeout, releaseOnCommit, RequestLockType.WRITE);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write or read lock '{}' held by another method. {}", lockNameType, e.getMessage());
             throw e;
@@ -98,7 +99,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Transactional(propagation = Propagation.REQUIRED)
     @Override
     public void unlock(String lockNameType) {
-        dbmsLockDao.unLock(lockNameType, null);
+        unlock(lockNameType, null);
     }
 
     @Transactional(propagation = Propagation.REQUIRED)
@@ -119,7 +120,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Transactional(propagation = Propagation.REQUIRED)
     public void convertToReadLock(String lockNameType) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.convertToReadLock(lockNameType, null, null);
+            convertToReadLock(lockNameType, null, null);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write lock '{}' held by another method. {}", lockNameType, e.getMessage());
             throw e;
@@ -140,7 +141,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Transactional(propagation = Propagation.REQUIRED)
     public void convertToReadLock(String lockNameType, String lockName) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.convertToReadLock(lockNameType, lockName, null);
+            convertToReadLock(lockNameType, lockName, null);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
@@ -151,7 +152,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Override
     public void convertToReadLock(String lockNameType, String lockName, Integer lockTimeout) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.convertToReadLock(lockNameType, lockName, lockTimeout);
+            dbmsLockDao.convertLock(lockNameType, lockName, lockTimeout, RequestLockType.READ);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
@@ -170,7 +171,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Transactional(propagation = Propagation.REQUIRED)
     public void convertToWriteLock(String lockNameType) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.convertToWriteLock(lockNameType, null, null);
+            convertToWriteLock(lockNameType, null, null);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write or read lock '{}' held by another method. {}", lockNameType, e.getMessage());
             throw e;
@@ -191,7 +192,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Transactional(propagation = Propagation.REQUIRED)
     public void convertToWriteLock(String lockNameType, String lockName) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.convertToWriteLock(lockNameType, lockName, null);
+            convertToWriteLock(lockNameType, lockName, null);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write or read lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
@@ -202,7 +203,7 @@ public class DbmsLockManagementService implements LockManagementService {
     @Override
     public void convertToWriteLock(String lockNameType, String lockName, Integer lockTimeout) throws LockManagerTimeoutException {
         try {
-            dbmsLockDao.convertToWriteLock(lockNameType, lockName, lockTimeout);
+            dbmsLockDao.convertLock(lockNameType, lockName, lockTimeout, RequestLockType.WRITE);
         } catch (LockManagerTimeoutException e) {
             LOGGER.warn("Write or read lock '{}' held by another method. {}", lockName, e.getMessage());
             throw e;
