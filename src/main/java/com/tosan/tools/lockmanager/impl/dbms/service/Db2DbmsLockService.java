@@ -1,42 +1,29 @@
-package com.tosan.tools.lockmanager.impl.dbms.dao;
+package com.tosan.tools.lockmanager.impl.dbms.service;
 
 import com.tosan.tools.lockmanager.exception.LockManagerRunTimeException;
-import com.tosan.tools.lockmanager.impl.dbms.dao.invoker.Db2DbmsLockInvoker;
+import com.tosan.tools.lockmanager.impl.dbms.dao.Db2DbmsLockDao;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.apache.commons.lang3.StringUtils;
 
 /**
  * @author akhbari
  * @since 02/03/2019
  */
-public class Db2DbmsLockDaoImpl implements DbmsLockDao {
-    private final Db2DbmsLockInvoker dbmsLockInvoker;
+public class Db2DbmsLockService implements DbmsLockService {
+    private final Db2DbmsLockDao db2DbmsLockDao;
     private String schemaName = null;
 
-    @PersistenceContext
-    private final jakarta.persistence.EntityManager entityManager;
-
-    public Db2DbmsLockDaoImpl(EntityManager entityManager) {
-        this.entityManager = entityManager;
-        this.dbmsLockInvoker = new Db2DbmsLockInvoker();
-    }
-
-    public EntityManager getEntityManager() {
-        return entityManager;
-    }
-
-    public Db2DbmsLockInvoker getDbmsLockInvoker() {
-        return dbmsLockInvoker;
+    public Db2DbmsLockService(EntityManager entityManager) {
+        this.db2DbmsLockDao = new Db2DbmsLockDao(entityManager);
     }
 
     @Override
     public String getSchemaName() {
         try {
             if (schemaName == null) {
-                synchronized (Db2DbmsLockDaoImpl.class) {
+                synchronized (Db2DbmsLockService.class) {
                     if (schemaName == null) {
-                        schemaName = dbmsLockInvoker.currentSchema(entityManager);
+                        schemaName = db2DbmsLockDao.currentSchema();
                     }
                 }
             }
@@ -48,8 +35,7 @@ public class Db2DbmsLockDaoImpl implements DbmsLockDao {
 
     @Override
     public void requestWriteLock(String lockNameType, String lockName, Integer timeout, boolean releaseOnCommit) {
-        dbmsLockInvoker.requestLock(
-                entityManager,
+        db2DbmsLockDao.requestLock(
                 getLockHandle(getSchemaName(), lockNameType, lockName),
                 null, timeout, releaseOnCommit);
     }
